@@ -1,0 +1,92 @@
+---
+title: "TS analysis"
+output: html_document
+date: "2023-05-06"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F)
+```
+
+# Preprocessing
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(forecast)
+library(tseries)
+ibtl <- read_excel("data/IB TL Data.xlsx")
+```
+
+
+```{r}
+ibtl <- ibtl %>%
+  mutate(yearmonth = paste0(`Ship Year`, "-",`Ship Month`,"-01")) %>%
+  mutate(date = as.Date(yearmonth))
+
+all_ship <- ibtl %>%
+  group_by(date) %>%
+  summarize(total_count = sum(`Shipment Count`))
+
+ship_series <- ts(all_ship$total_count, frequency=12, start=c(2019,11))
+```
+
+# Exploratory Analysis
+
+We aim to use Autoregressive Integrated Moving Average (ARIMA) models to depict the shipment time series. ARIMA models are defined for stationary time series. Therefore, we need to check stationarity before constructing models:
+
+```{r}
+plot.ts(ship_series)
+```
+
+
+From the time series plot we can see that overall there is upward trend in shipment from November of 2019 to October of 2022. No seasonality can be detected from the plot. However, the series does not show stationarity, so we need to difference:
+
+```{r}
+diff1 <- diff(ship_series, differences=1)
+plot.ts(diff1)
+```
+
+The resulting time series of first differences (above) gives us a stationary time series. However, a formal test, Augmented Dickey-Fuller Test can also be applied to illustrate stationarity:
+
+```{r}
+adf.test(diff1)
+```
+
+We reject the null hypothesis because the p-value is smaller than 0.05. This indicates that the time series is stationary. To put it another way, the first difference does not have time-dependent structure and thus exhibits constant variance over time.
+
+
+# Select ARIMA Models
+
+```{r}
+acf(diff1, lag.max=20)
+```
+
+We see from the correlogram that all other autocorrelations between lags 1-20 do not exceed the significance bounds, except for an outlier which is negligible. Thus, the p is 0.
+
+```{r}
+pacf(diff1, lag.max=20)
+```
+
+The partial correlogram shows that the partial autocorrelations does not exceed the bound. Thus, q=0. Now we can run our ARIMA model with p=0, d=1, q=0:
+
+```{r}
+shipseriesarima <- Arima(ship_series, order = c(0,1,0))
+summary(shipseriesarima)
+```
+
+# Forecasting
+
+Now we can use the ARIMA model to forecast the shipment count in the following 5 months:
+
+```{r}
+shiptimeseriesforecasts <- forecast::forecast(shipseriesarima, h=5)
+shiptimeseriesforecasts
+```
+
+We can plot the original time series, and the forecasted values as below:
+
+```{r}
+autoplot(shiptimeseriesforecasts)
+```
+
