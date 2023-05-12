@@ -1,0 +1,263 @@
+---
+title: "Truckload Freight Forecast Modeling"
+subtitle: 'ARIMA Time Series Models for Cities with Top Demands'
+author: "Victoria Shi"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F)
+```
+
+# I. Data Preprocessing
+
+```{r, echo=FALSE, message=FALSE}
+library(tidyverse)
+library(readxl)
+library(forecast)
+library(tseries)
+ibtl <- read_excel("data/IB TL Data.xlsx")
+```
+
+
+```{r}
+ibtl <- ibtl %>%
+  mutate(yearmonth = paste0(`Ship Year`, "-",`Ship Month`,"-01")) %>%
+  mutate(date = as.Date(yearmonth)) %>%
+  filter(`Pick State` %in% c("IA", "IL", "WI", "TN", "GA"))
+
+head(ibtl)
+```
+
+
+```{r, message=FALSE}
+all_ship <- ibtl %>%
+  group_by(`Pick State`, date) %>%
+  summarize(total_count = sum(`Shipment Count`))
+
+sum_total <- all_ship %>% group_by(`Pick State`) %>%
+  summarize(sum_total = sum(`total_count`))
+
+# Cities with Top 5 Shipping Demand across three years
+sum_total
+```
+
+
+
+```{r}
+GA_series <- ts(all_ship[all_ship$`Pick State`=="GA",]$total_count, frequency=12, start=c(2019,11))
+IA_series <- ts(all_ship[all_ship$`Pick State`=="IA",]$total_count, frequency=12, start=c(2019,11))
+IL_series <- ts(all_ship[all_ship$`Pick State`=="IL",]$total_count, frequency=12, start=c(2019,11))
+WI_series <- ts(all_ship[all_ship$`Pick State`=="WI",]$total_count, frequency=12, start=c(2019,11))
+TN_series <- ts(all_ship[all_ship$`Pick State`=="TN",]$total_count, frequency=12, start=c(2019,11))
+```
+
+# II. Exploratory Analysis
+
+We aim to use Autoregressive Integrated Moving Average (ARIMA) models to depict the shipment time series. ARIMA models are defined for stationary time series. Therefore, we need to check stationarity before constructing models:
+```{r}
+IL2020 <- IL_series[3: 14]  # 5256 to 4777
+cat("\nIL 2020 Shipping Count:\t", IL2020)
+IL2021 <-  IL_series[15: 26] 
+cat("\nIL 2021 Shipping Count:\t", IL2021)
+
+GA2020 <- GA_series[3: 14] 
+cat("\nGA 2020 Shipping Count:\t", GA2020)
+GA2021 <-  GA_series[15: 26] 
+cat("\nGA 2021 Shipping Count:\t", GA2021)
+
+IA2020 <- IL_series[3: 14]  
+cat("\nIA 2020 Shipping Count:\t", IA2020)
+IA2021 <-  IL_series[15: 26] 
+cat("\nIA 2021 Shipping Count:\t", IA2020)
+
+WI2020 <- WI_series[3: 14] 
+cat("\nWI 2020 Shipping Count:\t", WI2020)
+WI2021 <-  WI_series[15: 26] 
+cat("\nWI 2021 Shipping Count:\t", WI2021)
+
+TN2020 <- TN_series[3: 14] 
+cat("\nTN 2020 Shipping Count:\t", TN2020)
+TN2021 <-  TN_series[15: 26] 
+cat("\nTN 2021 Shipping Count:\t", TN2021)
+```
+
+
+```{r}
+par(mfrow = c(2, 2))
+
+plot.ts(GA2020, ylab = "Ship Count", main = "Goergia 2020", xlim = c(0, 12))
+plot.ts(GA2021, ylab = "Ship Count", main = "Goergia 2021", xlim = c(0, 12))
+
+
+plot.ts(IA2020, ylab = "Ship Count", main = "Indiana 2020", xlim = c(0, 12))
+plot.ts(IA2021, ylab = "Ship Count", main = "Indiana 2021", xlim = c(0, 12))
+```
+
+
+```{r}
+par(mfrow = c(3, 2))
+plot.ts(IL2020, ylab = "Ship Count", main = "Illinois 2020", xlim = c(0, 12))
+plot.ts(IL2021, ylab = "Ship Count", main = "Illinois 2021", xlim = c(0, 12))
+
+
+plot.ts(WI2020, ylab = "Ship Count", main = "Wisconsin 2020", xlim = c(0, 12))
+plot.ts(WI2021, ylab = "Ship Count", main = "Wisconsin 2021", xlim = c(0, 12))
+
+plot.ts(TN2020, ylab = "Ship Count", main = "Tennessee 2020", xlim = c(0, 12))
+plot.ts(TN2021, ylab = "Ship Count", main = "Tennessee 2021", xlim = c(0, 12))
+```
+
+```{r}
+plot.ts(GA_series, ylab = "Ship Count", main = "Georgia")
+plot.ts(IA_series, ylab = "Ship Count", main = "Indiana")
+plot.ts(IL_series, ylab = "Ship Count", main = "Illinois")
+plot.ts(WI_series, ylab = "Ship Count", main = "Wisconsin")
+plot.ts(TN_series, ylab = "Ship Count", main = "Tennessee")
+```
+
+
+From the time series plot we can see that overall there is upward trend in shipment from November of 2019 to October of 2022. No seasonality can be detected from the plot. However, the series does not show stationarity, so we need to plot the shipping count using different orders of difference:
+
+```{r}
+GA_diff1 <- diff(GA_series, differences=1)
+plot.ts(GA_diff1, main = "GA: first order of difference")
+
+IA_diff1 <- diff(IA_series, differences=1)
+plot.ts(IA_diff1, main = "IA: first order of difference")
+
+IL_diff1 <- diff(IL_series, differences=1)
+plot.ts(IL_diff1, main = "IL: first order of difference")
+
+WI_diff1 <- diff(WI_series, differences=1)
+plot.ts(WI_diff1, main = "IW: first order of difference")
+
+TN_diff1 <- diff(TN_series, differences=1)
+plot.ts(TN_diff1, main = "TN: first order of difference")
+```
+
+
+The resulting time series of first differences (above) gives us a stationary time series. 
+
+However, a formal test, Augmented Dickey-Fuller Test can also be applied to illustrate stationarity:
+
+```{r}
+adf.test(GA_diff1)
+adf.test(IA_diff1)
+adf.test(IL_diff1)
+adf.test(WI_diff1)
+adf.test(TN_diff1)
+```
+
+We reject the null hypothesis for IA, IL and TN, because the p-value is smaller than 0.05. This indicates that the time series is stationary. 
+
+To put it another way, the first difference does not have time-dependent structure and thus exhibits constant variance over time.
+
+But this is not the case for GA and WI, so we need the second difference for them and conduct Augmented Dickey-Fuller Test again. The results suggest that the second difference is stationary.
+
+```{r}
+GA_diff2 <- diff(GA_series, differences=2)
+plot.ts(GA_diff2)
+adf.test(GA_diff2)
+```
+
+```{r}
+WI_diff2 <- diff(WI_series, differences=2)
+plot.ts(WI_diff2)
+adf.test(WI_diff2)
+```
+
+# Select ARIMA Models
+
+```{r}
+par(mfrow = c(1,2))
+acf(IA_diff1, lag.max=20)
+pacf(IA_diff1, lag.max=20)
+```
+
+```{r}
+par(mfrow = c(1,2))
+acf(IL_diff1, lag.max=20)
+pacf(IL_diff1, lag.max=20)
+```
+
+```{r}
+par(mfrow = c(1,2))
+acf(TN_diff1, lag.max=20)
+pacf(TN_diff1, lag.max=20)
+```
+
+```{r}
+par(mfrow = c(1,2))
+acf(GA_diff2, lag.max=20)
+pacf(GA_diff2, lag.max=20)
+```
+
+```{r}
+par(mfrow = c(1,2))
+acf(WI_diff2, lag.max=20)
+pacf(WI_diff2, lag.max=20)
+```
+
+We see from the correlogram of IA that all other autocorrelations between lags 1-20 do not exceed the significance bounds. Thus, the p is 0. The partial correlogram shows that the partial autocorrelations does not exceed the bound. Thus, q=0. Now we can run our ARIMA model with p=0, d=1, q=0:
+
+```{r}
+IAarima <- Arima(IA_diff1, order = c(0,1,0))
+summary(IAarima)
+```
+
+```{r}
+ILarima <- Arima(IL_diff1, order = c(0,1,0))
+summary(ILarima)
+```
+
+```{r}
+TNarima <- Arima(TN_diff1, order = c(0,1,0))
+summary(TNarima)
+```
+
+```{r}
+GAarima <- Arima(GA_diff2, order = c(2,1,0))
+summary(GAarima)
+```
+
+```{r}
+WIarima <- Arima(WI_diff2, order = c(2,1,0))
+summary(WIarima)
+```
+
+
+# Forecasting
+
+Now we can use the ARIMA model to forecast the shipment count in the following 5 months:
+
+```{r}
+IAforecasts <- forecast::forecast(IAarima, h=5)
+IAforecasts
+
+ILforecasts <- forecast::forecast(ILarima, h=5)
+ILforecasts
+
+TNforecasts <- forecast::forecast(TNarima, h=5)
+TNforecasts
+
+GAforecasts <- forecast::forecast(GAarima, h=5)
+GAforecasts
+
+WIforecasts <- forecast::forecast(WIarima, h=5)
+WIforecasts
+```
+
+We can plot the original time series, and the forecasted values as below:
+
+```{r}
+autoplot(IAforecasts, main = "IA Forecasts from ARIMA(0, 1, 0)")
+autoplot(ILforecasts, main = "IL Forecasts from ARIMA(0, 1, 0)")
+autoplot(TNforecasts, main = "TN Forecasts from ARIMA(0, 1, 0)")
+autoplot(GAforecasts, main = "GA Forecasts from ARIMA(2, 1, 0)")
+autoplot(WIforecasts, main = "WI Forecasts from ARIMA(2, 1, 0)")
+```
+
